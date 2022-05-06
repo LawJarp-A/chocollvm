@@ -115,11 +115,10 @@ class LLVMBackend(Backend):
 
 
     def AssignStmt(self, node: AssignStmt):
-
-        val = self.visit(node.value)
+        value = self.visit(node.value)
         targets = node.targets[::-1]
         for target in targets:
-            self.builder.store(val, self.func_symtab[-1][target.name])
+            self.builder.store(value, self.func_symtab[-1][target.name])
 
     def IfStmt(self, node: IfStmt):
 
@@ -189,24 +188,31 @@ class LLVMBackend(Backend):
 
     def BinaryExpr(self, node: BinaryExpr) -> Optional[ICMPInstr]:
 
-        operator = node.operator
-        lhs = self.visit(node.left)
-        rhs = self.visit(node.right)
+        op = node.operator
+        lhs_node = self.visit(node.left)
+        rhs_node = self.visit(node.right)
 
-        if (operator == "+"):
-            return self.builder.add(lhs, rhs)
-        elif (operator == "-"):
-            return self.builder.sub(lhs, rhs)
-        elif (operator == "*"):
-            return self.builder.mul(lhs, rhs)
-        elif (operator == "%"):
-            return self.builder.srem(lhs, rhs)
-        elif (operator == "and"):
-            return self.builder.and_(lhs, rhs)
-        elif (operator == "or"):
-            return self.builder.or_(lhs, rhs)
-        elif (operator in ["<", ">", "<=", ">=", "!=", "=="]):
-            return self.builder.icmp_signed(operator, lhs, rhs)
+        comp_ops = [">=", 
+                    "!=", 
+                    "==", 
+                    "<", 
+                    ">", 
+                    "<="]
+
+        if (op == "+"):
+            return self.builder.add(lhs_node, rhs_node)
+        elif (op == "-"):
+            return self.builder.sub(lhs_node, rhs_node)
+        elif (op == "*"):
+            return self.builder.mul(lhs_node, rhs_node)
+        elif (op == "%"):
+            return self.builder.srem(lhs_node, rhs_node)
+        elif (op == "and"):
+            return self.builder.and_(lhs_node, rhs_node)
+        elif (op == "or"):
+            return self.builder.or_(lhs_node, rhs_node)
+        elif (op in comp_ops):
+            return self.builder.icmp_signed(op, lhs_node, rhs_node)
 
 
     def Identifier(self, node: Identifier) -> LoadInstr:
@@ -215,45 +221,43 @@ class LLVMBackend(Backend):
 
     def IfExpr(self, node: IfExpr) -> PhiInstr:
 
-        bb_condition = self.builder.append_basic_block(
+        cond = self.builder.append_basic_block(
                 self.module.get_unique_name("ifexpr.condition")
                 )
 
-        bb_then = self.builder.append_basic_block(
+        then = self.builder.append_basic_block(
                 self.module.get_unique_name("ifexpr.bb_then")
                 )
 
-        bb_else = self.builder.append_basic_block(
+        else_ = self.builder.append_basic_block(
                 self.module.get_unique_name("ifexpr.bb_else")
                 )
 
-        bb_end = self.builder.append_basic_block(
+        end_ = self.builder.append_basic_block(
                 self.module.get_unique_name("ifexpr.end")
                 )
 
-        self.builder.branch(bb_condition)
+        self.builder.branch(cond)
 
-        with self.builder.goto_block(bb_condition):
+        with self.builder.goto_block(cond):
             condition = self.visit(node.condition)
-            self.builder.cbranch(condition, bb_then, bb_else)
+            self.builder.cbranch(condition, then, else_)
 
 
-        with self.builder.goto_block(bb_then):
+        with self.builder.goto_block(then):
             thenExpr = self.visit(node.thenExpr)
-            self.builder.branch(bb_end)
+            self.builder.branch(end_)
 
-        with self.builder.goto_block(bb_else):
+        with self.builder.goto_block(else_):
             elseExpr = self.visit(node.elseExpr)
-            self.builder.branch(bb_end)
+            self.builder.branch(end_)
 
-        with self.builder.goto_block(bb_end):
+        with self.builder.goto_block(end_):
             type_name = str(node.thenExpr.inferredType)
             phi = self.builder.phi(self._get_llvm_type(type_name))
-            phi.add_incoming(thenExpr, bb_then)
-            phi.add_incoming(elseExpr, bb_else)
-
-
-        self.builder.position_at_end(bb_end)
+            phi.add_incoming(thenExpr, then)
+            phi.add_incoming(elseExpr, else_)
+        self.builder.position_at_end(end_)
         return phi
 
 
