@@ -106,25 +106,159 @@ class LLVMBackend(Backend):
     ##################################
 
     def VarDef(self, node: VarDef):
-        pass
+
+        var = self.visit(node.var)
+        alloca = self._create_alloca(var['name'], var['type'])
+        val = self.visit(node.value)
+        self.builder.store(val, alloca)
+        self.func_symtab[-1][var['name']] = alloca
+
 
     def AssignStmt(self, node: AssignStmt):
-        pass
+
+        val = self.visit(node.value)
+        targets = node.targets[::-1]
+        for target in targets:
+            self.builder.store(val, self.func_symtab[-1][target.name])
 
     def IfStmt(self, node: IfStmt):
-        pass
+
+        bb_condition = self.builder.append_basic_block(
+                self.module.get_unique_name("ifstmt.condition")
+                )
+
+        bb_then = self.builder.append_basic_block(
+                self.module.get_unique_name("ifstmt.bb_then")
+                )
+
+        bb_else = self.builder.append_basic_block(
+                self.module.get_unique_name("ifstmt.bb_else")
+                )
+
+        bb_end = self.builder.append_basic_block(
+                self.module.get_unique_name("ifstmt.end")
+                )
+
+        self.builder.branch(bb_condition)
+
+        with self.builder.goto_block(bb_condition):
+            condition = self.visit(node.condition)
+            self.builder.cbranch(condition, bb_then, bb_else)
+
+        with self.builder.goto_block(bb_then):
+            for stmt in node.thenBody:
+                self.visit(stmt)
+            self.builder.branch(bb_end)
+
+
+        with self.builder.goto_block(bb_else):
+            for stmt in node.elseBody:
+                self.visit(stmt)
+            self.builder.branch(bb_end)
+
+        self.builder.position_at_end(bb_end)
+
 
     def WhileStmt(self, node: WhileStmt):
-        pass
+
+        bb_condition = self.builder.append_basic_block(
+                self.module.get_unique_name("while.condition")
+                )
+
+        bb_body = self.builder.append_basic_block(
+                self.module.get_unique_name("while.body")
+                )
+
+        bb_end = self.builder.append_basic_block(
+                self.module.get_unique_name("while.end")
+                )
+
+        self.builder.branch(bb_condition)
+
+        with self.builder.goto_block(bb_condition):
+            condition = self.visit(node.condition)
+            self.builder.cbranch(condition, bb_body, bb_end)
+
+        with self.builder.goto_block(bb_body):
+            for stmt in node.body:
+                self.visit(stmt)
+            self.builder.branch(bb_condition)
+
+        self.builder.position_at_end(bb_end)
+
 
     def BinaryExpr(self, node: BinaryExpr) -> Optional[ICMPInstr]:
-        pass
+
+        operator = node.operator
+        lhs = self.visit(node.left)
+        rhs = self.visit(node.right)
+
+        if (operator == "+"):
+            return self.builder.add(lhs, rhs)
+        elif (operator == "-"):
+            return self.builder.sub(lhs, rhs)
+        elif (operator == "*"):
+            return self.builder.mul(lhs, rhs)
+        elif (operator == "%"):
+            return self.builder.srem(lhs, rhs)
+        elif (operator == "and"):
+            return self.builder.and_(lhs, rhs)
+        elif (operator == "or"):
+            return self.builder.or_(lhs, rhs)
+        elif (operator in ["<", ">", "<=", ">=", "!=", "=="]):
+            return self.builder.icmp_signed(operator, lhs, rhs)
+
 
     def Identifier(self, node: Identifier) -> LoadInstr:
-        pass
+
+        return self.builder.load(self.func_symtab[-1][node.name])
 
     def IfExpr(self, node: IfExpr) -> PhiInstr:
-        pass
+
+        bb_condition = self.builder.append_basic_block(
+                self.module.get_unique_name("ifexpr.condition")
+                )
+
+        bb_then = self.builder.append_basic_block(
+                self.module.get_unique_name("ifexpr.bb_then")
+                )
+
+        bb_else = self.builder.append_basic_block(
+                self.module.get_unique_name("ifexpr.bb_else")
+                )
+
+        bb_end = self.builder.append_basic_block(
+                self.module.get_unique_name("ifexpr.end")
+                )
+
+        self.builder.branch(bb_condition)
+
+        with self.builder.goto_block(bb_condition):
+            condition = self.visit(node.condition)
+            self.builder.cbranch(condition, bb_then, bb_else)
+
+
+        with self.builder.goto_block(bb_then):
+            thenExpr = self.visit(node.thenExpr)
+            self.builder.branch(bb_end)
+
+        with self.builder.goto_block(bb_else):
+            elseExpr = self.visit(node.elseExpr)
+            self.builder.branch(bb_end)
+
+        with self.builder.goto_block(bb_end):
+            type_name = str(node.thenExpr.inferredType)
+            phi = self.builder.phi(self._get_llvm_type(type_name))
+            phi.add_incoming(thenExpr, bb_then)
+            phi.add_incoming(elseExpr, bb_else)
+
+
+        self.builder.position_at_end(bb_end)
+        return phi
+
+
+
+
 
     ##################################
     #      END OF IMPLEMENTATION     #
